@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<LanguageData>
+
+	<OreOverlay>Ore Overlay</OreOverlay>
+
+	<OreOverlay.ShowOverlay>Toggle Ore Overlay.\n\nThis overlay highlights all visible surface level ores.\nWith an active Ground-penetrating Scanner this will show all ores.</OreOverlay.ShowOverlay>
+	<OreOverlay.ShowDrillOverlay>Toggle Deep Ore Overlay.\n\nThis is the same overlay used when selecting a Ground-penetrating Scanner or Deep Drill.</OreOverlay.ShowDrillOverlay>
+	
+	<OreOverlay.OptionCat>Ore Overlay</OreOverlay.OptionCat>
+	<OreOverlay.MultiColor>Multi-color Highlight</OreOverlay.MultiColor>
+	<OreOverlay.ShowSteam>Highlight Steam Vents</OreOverlay.ShowSteam>
+	<OreOverlay.ShowSeams>Show Resource Hover-overs</OreOverlay.ShowSeams>
+	
+</LanguageData>
