@@ -34,8 +34,9 @@ namespace OreOverlay
         }
     }
 
-    // Add GUI buttons
-    [HarmonyPatch(typeof(PlaySettings), "DoPlaySettingsGlobalControls")]
+
+	// Add GUI buttons
+	[HarmonyPatch(typeof(PlaySettings), "DoPlaySettingsGlobalControls")]
     internal static class HarmoneyPatchPlaySettings
     {
         [HarmonyPostfix]
@@ -54,96 +55,21 @@ namespace OreOverlay
             row.ToggleableIcon(ref OreOverlayGrid.m_ShowDeepOres, HarmonyPatches.m_DeepHudIcon, "OreOverlay.ShowDrillOverlay".Translate(), SoundDefOf.Mouseover_ButtonToggle);
         }
     }
+	
+	// Insert a refresher in the same location used by other overlays. We want to avoid calculations here but drawing here allows the overlay to show during game pause.
+	[HarmonyPatch(typeof(MapInterface))]
+	internal static class HarmoneyPatchUpdate
+	{
+		[HarmonyPostfix]
+		[HarmonyPatch("MapInterfaceUpdate")]
+		private static void Postfix(DeepResourceGrid __instance)
+		{
+			OreOverlayGrid Overlay = Find.CurrentMap.GetComponent<OreOverlayGrid>();
 
-    // Update 'map' when something is mined or descovered underground
-    // DeepResourceGrid.DeepResourceGridUpdate()
-    [HarmonyPatch(typeof(DeepResourceGrid))]
-    internal static class HarmoneyPatchUpdate
-    {
-        [HarmonyPostfix]
-        [HarmonyPatch("DeepResourceGridUpdate")]
-        private static void Postfix(DeepResourceGrid __instance)
-        {
-            foreach (OreOverlayGrid Overlay in OreOverlayGrid.m_OverlayList)
-            {
-                try
-                {
-                    Overlay.RefreshData();
-                }
-                catch (Exception)
-                {
-
-                }
-            }
-        }
-    }
-
-    // Update 'map' when something is mined
-    // Mineable.DestroyMined
-    [HarmonyPatch(typeof(Mineable))]
-    internal static class HarmoneyPatchUpdateMine
-    {
-        [HarmonyPostfix]
-        [HarmonyPatch("DestroyMined")]
-        private static void Postfix(Mineable __instance)
-        {
-            foreach (OreOverlayGrid Overlay in OreOverlayGrid.m_OverlayList)
-            {
-                try
-                {
-                    Overlay.RefreshData();
-                }
-                catch (Exception)
-                {
-
-                }
-            }
-        }
-    }
-
-    // Update 'map' when something is broken
-    // Mineable.Destroy
-    [HarmonyPatch(typeof(Mineable))]
-    internal static class HarmoneyPatchUpdateDestroy
-    {
-        [HarmonyPostfix]
-        [HarmonyPatch("Destroy")]
-        private static void Postfix(Mineable __instance)
-        {
-            foreach (OreOverlayGrid Overlay in OreOverlayGrid.m_OverlayList)
-            {
-                try
-                {
-                    Overlay.RefreshData();
-                }
-                catch (Exception)
-                {
-
-                }
-            }
-        }
-    }
-
-    // Update 'map' when something is revealed
-    // TriggerUnfogged.Activated
-    [HarmonyPatch(typeof(TriggerUnfogged))]
-    internal static class HarmoneyPatchUpdateUnfog
-    {
-        [HarmonyPostfix]
-        [HarmonyPatch("Activated")]
-        private static void Postfix(TriggerUnfogged __instance)
-        {
-            foreach (OreOverlayGrid Overlay in OreOverlayGrid.m_OverlayList)
-            {
-                try
-                {
-                    Overlay.RefreshData();
-                }
-                catch (Exception)
-                {
-
-                }
-            }
-        }
-    }
+			if (Overlay != null)
+			{
+				Overlay.OreGridDraw(); // Draw!
+			}
+		}
+	}
 }

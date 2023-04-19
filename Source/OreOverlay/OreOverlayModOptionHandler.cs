@@ -39,17 +39,12 @@ namespace OreOverlay
             base.WriteSettings();
             m_Settings.Init();
 
-            foreach (OreOverlayGrid Overlay in OreOverlayGrid.m_OverlayList)
-            {
-                try
-                {
-                    Overlay.RefreshData();
-                }
-                catch (Exception)
-                {
+			OreOverlayGrid Overlay = Find.CurrentMap.GetComponent<OreOverlayGrid>();
 
-                }
-            }
+			if (Overlay != null)
+			{
+				Overlay.RefreshOreOverlayData(true); // Settings changed, force a refresh.
+			}
         }
     }
 }
