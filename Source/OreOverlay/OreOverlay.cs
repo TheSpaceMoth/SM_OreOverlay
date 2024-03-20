@@ -190,7 +190,7 @@ namespace OreOverlay
 							this.m_ThingMap[i] = Th.def.shortHash;
 							this.m_ColorMap[i] = m_ChemfuelDeposit;
 						}
-						else if (Th.def.defName == "VPE_HelixienGeyser")
+						else if ((Th.def.defName == "VPE_HelixienGeyser") || (Th.def.defName == "VHGE_GasGeyser"))
 						{
 							this.m_ThingMap[i] = Th.def.shortHash;
 							this.m_ColorMap[i] = m_HexDeposit;
@@ -252,7 +252,7 @@ namespace OreOverlay
                     // Hide if steam
                     ThingDef CellDef = DefDatabase<ThingDef>.GetByShortHash(m_ThingMap[index]);
 
-                    if ((CellDef.defName == "SteamGeyser") || (CellDef.defName == "VPE_ChemfuelPond") || (CellDef.defName == "VPE_HelixienGeyser"))
+                    if ((CellDef.defName == "SteamGeyser") || (CellDef.defName == "VPE_ChemfuelPond") || (CellDef.defName == "VPE_HelixienGeyser") || (CellDef.defName == "VHGE_GasGeyser"))
                         return false;
                 }
 
@@ -338,7 +338,7 @@ namespace OreOverlay
                             // Hide if steam
                             ThingDef CellDef = DefDatabase<ThingDef>.GetByShortHash(m_ThingMap[index]);
 
-                            if ((CellDef.defName == "SteamGeyser") || (CellDef.defName == "VPE_ChemfuelPond") || (CellDef.defName == "VPE_HelixienGeyser"))
+                            if ((CellDef.defName == "SteamGeyser") || (CellDef.defName == "VPE_ChemfuelPond") || (CellDef.defName == "VPE_HelixienGeyser") || (CellDef.defName == "VHGE_GasGeyser"))
                                 DrawHoverover = false;
 
 							if (DrawHoverover == true)
