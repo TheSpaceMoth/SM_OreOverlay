@@ -247,7 +247,7 @@ namespace OreOverlay
 
             if (m_ThingMap[index] != 0)
             {
-                if (OreOverlayModOptionHandler.m_Settings.m_ShowSteam == false)
+                if (OreOverlayModOptions.m_ShowSteam == false)
                 {
                     // Hide if steam
                     ThingDef CellDef = DefDatabase<ThingDef>.GetByShortHash(m_ThingMap[index]);
@@ -317,7 +317,7 @@ namespace OreOverlay
             }
             
 			// Handle the mouse over for cliff ores.
-            if ((OreOverlayModOptionHandler.m_Settings.m_ShowSeams == true) && (m_ShowOres == true))
+            if ((OreOverlayModOptions.m_ShowSeams == true) && (m_ShowOres == true))
             {
                 DrawHoverover = true;
 

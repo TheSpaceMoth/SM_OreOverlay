@@ -8,43 +8,71 @@ using Verse;
 
 namespace OreOverlay
 {
-    class OreOverlayModOptionHandler : Mod
-    {
-        public static OreOverlayModOptions m_Settings;
+	[StaticConstructorOnStartup]
+	class OreOverlayModOptionHandler : Mod
+	{
+		//public static OreOverlayModOptions m_Settings;
 
-        public OreOverlayModOptionHandler(ModContentPack content) : base(content)
-        {
-            m_Settings = this.GetSettings<OreOverlayModOptions>();
-        }
+		public OreOverlayModOptionHandler(ModContentPack content) : base(content)
+		{
+			base.GetSettings<OreOverlayModOptions>();
+		}
 
-        public override void DoSettingsWindowContents(Rect inRect)
-        {
-            Listing_Standard listingStandard = new Listing_Standard();
-            listingStandard.Begin(inRect);
+		public void Save()
+		{
+			try
+			{
+				LoadedModManager.GetMod<OreOverlayModOptionHandler>().GetSettings<OreOverlayModOptions>().Write();
+			}
+			catch (Exception)
+			{
 
-            listingStandard.CheckboxLabeled("OreOverlay.OptionCat".Translate(), ref m_Settings.m_ColourCodedOres);
-            listingStandard.CheckboxLabeled("OreOverlay.ShowSteam".Translate(), ref m_Settings.m_ShowSteam);
-            listingStandard.CheckboxLabeled("OreOverlay.ShowSeams".Translate(), ref m_Settings.m_ShowSeams);
-            listingStandard.End();
-            base.DoSettingsWindowContents(inRect);
-        }
+			}
+		}
 
-        public override string SettingsCategory()
-        {
-            return "OreOverlay.OptionCat".Translate();
-        }
+		public override string SettingsCategory()
+		{
+			string CatString = "Ore Overlay";
 
+			try
+			{
+				CatString = "OreOverlay.OptionCat".Translate();
+			}
+			catch(Exception)
+			{
+				CatString = "Ore Overlay";
+			}
+
+			return CatString;
+		}
+
+		public override void DoSettingsWindowContents(Rect inRect)
+		{
+			OreOverlayModOptions.DoSettingsWindowContents(inRect);
+		}
+
+		
         public override void WriteSettings()
         {
-            base.WriteSettings();
-            m_Settings.Init();
+			base.WriteSettings();
+            //m_Settings.Init();
 
-			OreOverlayGrid Overlay = Find.CurrentMap.GetComponent<OreOverlayGrid>();
-
-			if (Overlay != null)
+			try
 			{
-				Overlay.RefreshOreOverlayData(true); // Settings changed, force a refresh.
+				if (Find.CurrentMap != null)
+				{
+					OreOverlayGrid Overlay = Find.CurrentMap.GetComponent<OreOverlayGrid>();
+
+					if (Overlay != null)
+					{
+						Overlay.RefreshOreOverlayData(true); // Settings changed, force a refresh.
+					}
+				}
 			}
-        }
+			catch (Exception)
+			{
+
+			}
+		}
     }
 }
