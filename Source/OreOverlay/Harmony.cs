@@ -58,14 +58,19 @@ namespace OreOverlay
 	{
 		[HarmonyPostfix]
 		[HarmonyPatch("MapInterfaceUpdate")]
-		private static void Postfix(DeepResourceGrid __instance)
+		private static void Postfix()
 		{
-			OreOverlayGrid Overlay = Find.CurrentMap.GetComponent<OreOverlayGrid>();
+            Map CurMap = Find.CurrentMap;
 
-			if (Overlay != null)
-			{
-				Overlay.OreGridDraw(); // Draw!
-			}
+            if (CurMap != null)
+            {
+                OreOverlayGrid Overlay = CurMap.GetComponent<OreOverlayGrid>();
+
+                if (Overlay != null)
+                {
+                    Overlay.OreGridDraw(); // Draw!
+                }
+            }
 		}
 	}
 }

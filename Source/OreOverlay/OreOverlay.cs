@@ -46,6 +46,7 @@ namespace OreOverlay
         private static List<KeyValuePair<ThingDef, Color>> m_MineableList = null;
         private ushort[] m_ThingMap = null; // Short map
         private Color[] m_ColorMap = null;
+		private List<int> m_GlobalOreCellList = null;	// A list of every cell containing ore regardless if its shown or not
 		
 		// Refresh monitering
 		private static int m_LastTick = 0;
@@ -146,15 +147,19 @@ namespace OreOverlay
 			{
 				m_LastCheckOverlayEnabled = false;
 			}
-			
-			// Update the grid itself 
-			if ((PerformUpdate == true) || (ForceRefresh == true))
+
+			if (m_GlobalOreCellList == null)
+				m_GlobalOreCellList = new List<int>();
+
+			if (ForceRefresh == true)
 			{
-				m_LastTick = Find.TickManager.TicksGame;
+				// Deep refresh over every cell
+				m_GlobalOreCellList.Clear();
 
 				// Now search every tile
 				for (int i = 0; i < map.cellIndices.NumGridCells; i++)
 				{
+					// Reset the map
 					this.m_ThingMap[i] = 0;
 					this.m_ColorMap[i] = m_DefaultOreColor;
 
@@ -171,8 +176,7 @@ namespace OreOverlay
 						{
 							if (MineEntry.Key == MineCell.def)
 							{
-								this.m_ThingMap[i] = MineCell.def.shortHash;
-								this.m_ColorMap[i] = MineEntry.Value;
+								m_GlobalOreCellList.AddUnique(i);
 								break;
 							}
 						}
@@ -182,23 +186,77 @@ namespace OreOverlay
 					{
 						if (Th.def.defName == "SteamGeyser")
 						{
-							this.m_ThingMap[i] = Th.def.shortHash;
-							this.m_ColorMap[i] = m_SteamVent;
+							m_GlobalOreCellList.AddUnique(i);
 						}
 						else if (Th.def.defName == "VPE_ChemfuelPond")
 						{
-							this.m_ThingMap[i] = Th.def.shortHash;
-							this.m_ColorMap[i] = m_ChemfuelDeposit;
+							m_GlobalOreCellList.AddUnique(i);
 						}
 						else if ((Th.def.defName == "VPE_HelixienGeyser") || (Th.def.defName == "VHGE_GasGeyser"))
 						{
-							this.m_ThingMap[i] = Th.def.shortHash;
-							this.m_ColorMap[i] = m_HexDeposit;
+							m_GlobalOreCellList.AddUnique(i);
 						}
 					}
 				}
+			}
+			
+			
+			if ((PerformUpdate == true) || (ForceRefresh == true))
+			{
+				// Light refresh over the already known ore locations
+				m_LastTick = Find.TickManager.TicksGame;
 
-				m_Drawer.SetDirty();
+				// Sanity check
+				if (m_GlobalOreCellList != null)
+				{
+					// Now search every tile
+					foreach (int i in m_GlobalOreCellList)
+					{
+						this.m_ThingMap[i] = 0;
+						this.m_ColorMap[i] = m_DefaultOreColor;
+
+						IntVec3 MapCell = m_Map.cellIndices.IndexToCell(i);
+
+						if (!MapCell.InBounds(this.m_Map))
+							continue;
+
+						Mineable MineCell = MapCell.GetFirstMineable(m_Map);
+
+						if (MineCell != null)
+						{
+							foreach (KeyValuePair<ThingDef, Color> MineEntry in m_MineableList)
+							{
+								if (MineEntry.Key == MineCell.def)
+								{
+									this.m_ThingMap[i] = MineCell.def.shortHash;
+									this.m_ColorMap[i] = MineEntry.Value;
+									break;
+								}
+							}
+						}
+
+						foreach (Thing Th in MapCell.GetThingList(m_Map))
+						{
+							if (Th.def.defName == "SteamGeyser")
+							{
+								this.m_ThingMap[i] = Th.def.shortHash;
+								this.m_ColorMap[i] = m_SteamVent;
+							}
+							else if (Th.def.defName == "VPE_ChemfuelPond")
+							{
+								this.m_ThingMap[i] = Th.def.shortHash;
+								this.m_ColorMap[i] = m_ChemfuelDeposit;
+							}
+							else if ((Th.def.defName == "VPE_HelixienGeyser") || (Th.def.defName == "VHGE_GasGeyser"))
+							{
+								this.m_ThingMap[i] = Th.def.shortHash;
+								this.m_ColorMap[i] = m_HexDeposit;
+							}
+						}
+					}
+
+					m_Drawer.SetDirty();
+				}
 			}			
         }
 
@@ -215,20 +273,27 @@ namespace OreOverlay
 		// This function draws the ore overlay, and is called from the same place existing overlays are called from both paused and unpaused.
 		public void OreGridDraw()
 		{
-			if (m_ShowOres == true)
+			try
 			{
-				// Check for force refresh.
-				if (m_LastCheckOverlayEnabled == false)
-					RefreshOreOverlayData(true);
+				if (m_ShowOres == true)
+				{
+					// Check for force refresh.
+					if (m_LastCheckOverlayEnabled == false)
+						RefreshOreOverlayData(true);
 
-				this.MarkForDraw();
+					this.MarkForDraw();
+				}
+
+				m_Drawer.CellBoolDrawerUpdate();
+
+				// Check for draw debug so we dont do it twice.
+				if ((DebugViewSettings.drawDeepResources == false) && (m_ShowDeepOres == true))
+					this.m_Map.deepResourceGrid.MarkForDraw();
 			}
-
-			m_Drawer.CellBoolDrawerUpdate();
-
-			// Check for draw debug so we dont do it twice.
-			if ((DebugViewSettings.drawDeepResources == false) && (m_ShowDeepOres == true))
-                this.m_Map.deepResourceGrid.MarkForDraw();
+			catch (NullReferenceException)
+			{
+				// Something has cleared
+			}
         }
 
         public void MarkForDraw()
@@ -247,7 +312,7 @@ namespace OreOverlay
 
             if (m_ThingMap[index] != 0)
             {
-                if (OreOverlayModOptions.m_ShowSteam == false)
+				if (OreOverlayModOptions.m_ShowSteam == false)
                 {
                     // Hide if steam
                     ThingDef CellDef = DefDatabase<ThingDef>.GetByShortHash(m_ThingMap[index]);
