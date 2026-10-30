@@ -19,40 +19,61 @@ namespace OreOverlay
         private static readonly Color m_SteamVent = CreateColor(41, 68, 194);
         private static readonly Color m_HexDeposit = CreateColor(96, 194, 82);
 
-		List<KeyValuePair<string, Color>> m_ColorOverrides = new List<KeyValuePair<string, Color>>()
+		private static readonly Dictionary<string, Color> m_ColorOverrides = new Dictionary<string, Color>()
 		{
-			new KeyValuePair<string, Color>("MineableSteel",      CreateColor(214, 141, 91)),
-			new KeyValuePair<string, Color>("MineableSilver",      CreateColor(186, 179, 157)),
-			new KeyValuePair<string, Color>("MineableGold",      CreateColor(209, 166, 17)),
-			new KeyValuePair<string, Color>("MineableUranium",      CreateColor(164, 189, 173)),
-			new KeyValuePair<string, Color>("MineablePlasteel",      CreateColor(160, 206, 214)),
-			new KeyValuePair<string, Color>("MineableJade",      CreateColor(25, 190, 0)),
-			new KeyValuePair<string, Color>("MineableComponentsIndustrial",      CreateColor(194, 120, 24)),
-			new KeyValuePair<string, Color>("MineableBlueJade",      CreateColor(44,96,165)),
-			new KeyValuePair<string, Color>("MineableRedJade",      CreateColor(185,35,31)),
-			new KeyValuePair<string, Color>("MineableWhiteJade",      CreateColor(255,255,255)),
-			new KeyValuePair<string, Color>("MineableBlackJade",      CreateColor(32,32,32)),
-			new KeyValuePair<string, Color>("MineableYellowJade",      CreateColor(230,194,44)),
-			new KeyValuePair<string, Color>("VPE_EltexOre",      CreateColor(181,230,224)),
+			{ "MineableSteel",      CreateColor(214, 141, 91) },
+			{ "MineableSilver",      CreateColor(186, 179, 157) },
+			{ "MineableGold",      CreateColor(209, 166, 17) },
+			{ "MineableUranium",      CreateColor(164, 189, 173) },
+			{ "MineablePlasteel",      CreateColor(160, 206, 214) },
+			{ "MineableJade",      CreateColor(25, 190, 0) },
+			{ "MineableComponentsIndustrial",      CreateColor(194, 120, 24) },
+			{ "MineableBlueJade",      CreateColor(44,96,165) },
+			{ "MineableRedJade",      CreateColor(185,35,31) },
+			{ "MineableWhiteJade",      CreateColor(255,255,255) },
+			{ "MineableBlackJade",      CreateColor(32,32,32) },
+			{ "MineableYellowJade",      CreateColor(230,194,44) },
+			{ "VPE_EltexOre",      CreateColor(181,230,224) },
+		};
+
+		// Geysers and ponds. These win over ores on the same cell and can be hidden with the "show steam" option.
+		private static readonly Dictionary<string, Color> m_SpecialThings = new Dictionary<string, Color>()
+		{
+			{ "SteamGeyser",      m_SteamVent },
+			{ "VPE_ChemfuelPond",      m_ChemfuelDeposit },
+			{ "VPE_HelixienGeyser",      m_HexDeposit },
+			{ "VHGE_GasGeyser",      m_HexDeposit },
 		};
 
 		public Color Color => Color.white;
 		#endregion
 
+		// How often the grid is rescanned while the overlay is shown, and how often the deep scanner state is checked.
+		private const int RefreshIntervalTicks = 500;
+		private const int ScannerCheckIntervalTicks = 60;
+
+		// Lookup tables indexed by ThingDef.index, built once from the def database.
+		// The tables hold the def itself instead of a flag, and lookups compare it with the def being checked:
+		// a mod that removes defs without reindexing can leave two defs with the same index.
+		private static ThingDef[] m_OreDefAt = null;
+		private static ThingDef[] m_SpecialDefAt = null;
+		private static Color[] m_DefColor = null;
+
 		private Map m_Map;
 
 		// Variables used to control the overlay's data for display.
         private CellBoolDrawer m_Drawer;
-        private static List<KeyValuePair<ThingDef, Color>> m_MineableList = null;
-        private ushort[] m_ThingMap = null; // Short map
+		private ThingDef[] m_CellDef = null; // Ore or special thing on each cell, null if none
         private Color[] m_ColorMap = null;
-		private List<int> m_GlobalOreCellList = null;	// A list of every cell containing ore regardless if its shown or not
-		
-		// Refresh monitering
-		private static int m_LastTick = 0;
-		private static bool m_LastCheckActiveScanner = false;
-		private static bool m_LastCheckOverlayEnabled = false;
-		
+		private bool[] m_CellVisible = null; // Precomputed result for GetCellBool
+
+		// Refresh monitoring, per map
+		private int m_LastRefreshTick = -1;
+		private int m_LastScannerCheckTick = -1;
+		private bool m_ActiveScanner = false;
+		private bool m_Stale = true;
+		private bool m_WasShown = false;
+
 		// Initialiser
         public OreOverlayGrid(Map map) : base(map)
         {
@@ -61,203 +82,163 @@ namespace OreOverlay
 
             this.m_Drawer = new CellBoolDrawer((ICellBoolGiver)this, map.Size.x, map.Size.z, 3640, 0.33f);
 
-			PrepareMinableColourmap();
+			PrepareDefLookup();
 
-			// Create the map
-			this.m_ThingMap = new ushort[map.cellIndices.NumGridCells];
-            this.m_ColorMap = new Color[map.cellIndices.NumGridCells];
-
-			RefreshOreOverlayData(true);
+			// Create the map. It is filled in on the first draw with the overlay shown.
+			int NumCells = map.cellIndices.NumGridCells;
+			this.m_CellDef = new ThingDef[NumCells];
+			this.m_ColorMap = new Color[NumCells];
+			this.m_CellVisible = new bool[NumCells];
         }
 
 		#region Ore data refresh
-		// This function prepares a list used to determine what colour ores should be. Update here to support new ores.
-		private void PrepareMinableColourmap()
+		// This function prepares the lookup tables used to determine what is highlighted and in which colour. Update here to support new ores.
+		private static void PrepareDefLookup()
 		{
-			if (m_MineableList == null)
+			if (m_OreDefAt != null)
+				return;
+
+			int DefCount = 0;
+			foreach (ThingDef thingDef in DefDatabase<ThingDef>.AllDefsListForReading)
+				DefCount = Math.Max(DefCount, thingDef.index + 1);
+
+			ThingDef[] OreDefAt = new ThingDef[DefCount];
+			ThingDef[] SpecialDefAt = new ThingDef[DefCount];
+			Color[] DefColor = new Color[DefCount];
+
+			foreach (ThingDef thingDef in DefDatabase<ThingDef>.AllDefsListForReading)
 			{
-				List<KeyValuePair<ThingDef, Color>> EntryList = new List<KeyValuePair<ThingDef, Color>>();
+				if (thingDef.index >= DefCount)
+					continue;
 
-				// Make a list mineables that we will highlight. Update here to ignore.
-				foreach (ThingDef thingDef in DefDatabase<ThingDef>.AllDefsListForReading)
+				if (m_SpecialThings.TryGetValue(thingDef.defName, out Color SpecialColor))
 				{
-					if ((thingDef.mineable == true) && (thingDef.IsNonResourceNaturalRock == false))
-					{
-						if ((thingDef.defName.ToLower().StartsWith("smooth") == false) && (thingDef.defName.ToLower().StartsWith("raised") == false) && (thingDef.defName != "CollapsedRocks"))
-							EntryList.Add(new KeyValuePair<ThingDef, Color>(thingDef, thingDef.uiIconColor));
-					}
+					SpecialDefAt[thingDef.index] = thingDef;
+					DefColor[thingDef.index] = SpecialColor;
 				}
-
-				// Override some colour defaults
-				for (int i = 0; i < EntryList.Count; i++)
+				else if (IsOreDef(thingDef))
 				{
-					foreach (KeyValuePair<string, Color> OverrideEntry in m_ColorOverrides)
-					{
-						if (OverrideEntry.Key == EntryList[i].Key.defName)
-						{
-							ThingDef TempThing = EntryList[i].Key;
-							EntryList.RemoveAt(i);
-							EntryList.Insert(0, new KeyValuePair<ThingDef, Color>(TempThing, OverrideEntry.Value));
-						}
-					}
-				}
+					OreDefAt[thingDef.index] = thingDef;
 
-				// Just in case of multi threading? unlikely..
-				if (m_MineableList == null)
-					m_MineableList = new List<KeyValuePair<ThingDef, Color>>(EntryList);
+					if (m_ColorOverrides.TryGetValue(thingDef.defName, out Color OverrideColor))
+						DefColor[thingDef.index] = OverrideColor;
+					else
+						DefColor[thingDef.index] = thingDef.uiIconColor;
+				}
 			}
+
+			m_SpecialDefAt = SpecialDefAt;
+			m_DefColor = DefColor;
+			m_OreDefAt = OreDefAt;
 		}
 
-		// This is called each tick while the game is running, and is paused when the game is paused.
-		public override void MapComponentTick()
+		// Mineables we will highlight. Update here to ignore.
+		private static bool IsOreDef(ThingDef thingDef)
 		{
-			RefreshOreOverlayData(false);
+			if ((thingDef.mineable == false) || (thingDef.IsNonResourceNaturalRock == true))
+				return false;
+
+			if ((thingDef.defName.ToLower().StartsWith("smooth") == true) || (thingDef.defName.ToLower().StartsWith("raised") == true) || (thingDef.defName == "CollapsedRocks"))
+				return false;
+
+			return true;
 		}
 
-		// This recalculates the data used to produce the overlay. This takes time and causes the majority of the lag..
-		public void RefreshOreOverlayData(bool ForceRefresh = true)
-		{
-			bool PerformUpdate = false;
+		private static bool IsOre(ThingDef def) => (def.index < m_OreDefAt.Length) && (m_OreDefAt[def.index] == def);
 
-			// Only check for updates while the overlay is shown
-			if (m_ShowOres == true)
+		private static bool IsSpecial(ThingDef def) => (def.index < m_SpecialDefAt.Length) && (m_SpecialDefAt[def.index] == def);
+
+		// Forces a refresh on the next draw, e.g. after the mod settings changed.
+		public void MarkStale()
+		{
+			m_Stale = true;
+		}
+
+		// Called every frame for the current map. Decides whether the grid needs to be rescanned.
+		private void CheckForRefresh()
+		{
+			int TicksGame = Find.TickManager.TicksGame;
+
+			// Update because ores were just turned on, or this map was just switched to
+			if (m_WasShown == false)
 			{
-				// Update due to ticks passed
-				if ((m_LastTick == 0) || ((m_LastTick + 500) < Find.TickManager.TicksGame))
-				{
-					PerformUpdate = true;
-				}
+				m_WasShown = true;
+				m_Stale = true;
+				m_LastScannerCheckTick = -1;
+			}
 
-				// Update due to change in active scanner state
+			// Update due to change in active scanner state
+			if ((m_LastScannerCheckTick < 0) || (TicksGame - m_LastScannerCheckTick >= ScannerCheckIntervalTicks))
+			{
+				m_LastScannerCheckTick = TicksGame;
+
 				bool ActiveScanner = this.m_Map.deepResourceGrid.AnyActiveDeepScannersOnMap();
-				if (m_LastCheckActiveScanner != ActiveScanner)
+				if (m_ActiveScanner != ActiveScanner)
 				{
-					m_LastCheckActiveScanner = ActiveScanner;
-					PerformUpdate = true;
-				}
-
-				// Update because ores were just turned on
-				if (m_LastCheckOverlayEnabled == false)
-				{
-					PerformUpdate = true;
-					m_LastCheckOverlayEnabled = true;
+					m_ActiveScanner = ActiveScanner;
+					m_Stale = true;
 				}
 			}
-			else
+
+			// Update due to ticks passed
+			if ((m_LastRefreshTick < 0) || (TicksGame - m_LastRefreshTick >= RefreshIntervalTicks))
+				m_Stale = true;
+
+			if (m_Stale == true)
+				RefreshOreOverlayData();
+		}
+
+		// This recalculates the data used to produce the overlay.
+		private void RefreshOreOverlayData()
+		{
+			m_Stale = false;
+			m_LastRefreshTick = Find.TickManager.TicksGame;
+
+			bool ShowSpecial = OreOverlayModOptions.m_ShowSteam;
+			bool ActiveScanner = m_ActiveScanner;
+			ThingGrid Grid = m_Map.thingGrid;
+			FogGrid Fog = m_Map.fogGrid;
+			bool Changed = false;
+
+			// Now search every tile
+			int NumCells = m_Map.cellIndices.NumGridCells;
+			for (int i = 0; i < NumCells; i++)
 			{
-				m_LastCheckOverlayEnabled = false;
-			}
+				ThingDef CellDef = null;
+				Color CellColor = m_DefaultOreColor;
+				bool CellIsSpecial = false;
 
-			if (m_GlobalOreCellList == null)
-				m_GlobalOreCellList = new List<int>();
-
-			if (ForceRefresh == true)
-			{
-				// Deep refresh over every cell
-				m_GlobalOreCellList.Clear();
-
-				// Now search every tile
-				for (int i = 0; i < map.cellIndices.NumGridCells; i++)
+				List<Thing> Things = Grid.ThingsListAtFast(i);
+				for (int t = 0; t < Things.Count; t++)
 				{
-					// Reset the map
-					this.m_ThingMap[i] = 0;
-					this.m_ColorMap[i] = m_DefaultOreColor;
+					ThingDef Def = Things[t].def;
 
-					IntVec3 MapCell = m_Map.cellIndices.IndexToCell(i);
-
-					if (!MapCell.InBounds(this.m_Map))
-						continue;
-
-					Mineable MineCell = MapCell.GetFirstMineable(m_Map);
-
-					if (MineCell != null)
+					if (IsSpecial(Def))
 					{
-						foreach (KeyValuePair<ThingDef, Color> MineEntry in m_MineableList)
-						{
-							if (MineEntry.Key == MineCell.def)
-							{
-								m_GlobalOreCellList.AddUnique(i);
-								break;
-							}
-						}
+						CellDef = Def;
+						CellColor = m_DefColor[Def.index];
+						CellIsSpecial = true;
 					}
-
-					foreach (Thing Th in MapCell.GetThingList(m_Map))
+					else if ((CellDef == null) && IsOre(Def))
 					{
-						if (Th.def.defName == "SteamGeyser")
-						{
-							m_GlobalOreCellList.AddUnique(i);
-						}
-						else if (Th.def.defName == "VPE_ChemfuelPond")
-						{
-							m_GlobalOreCellList.AddUnique(i);
-						}
-						else if ((Th.def.defName == "VPE_HelixienGeyser") || (Th.def.defName == "VHGE_GasGeyser"))
-						{
-							m_GlobalOreCellList.AddUnique(i);
-						}
+						CellDef = Def;
+						CellColor = m_DefColor[Def.index];
 					}
 				}
+
+				bool Visible = (CellDef != null) && ((ShowSpecial == true) || (CellIsSpecial == false)) && ((ActiveScanner == true) || (Fog.IsFogged(i) == false));
+
+				// Only rebuild the overlay mesh if something actually changed
+				if ((Visible != m_CellVisible[i]) || ((Visible == true) && (CellColor != m_ColorMap[i])))
+					Changed = true;
+
+				this.m_CellDef[i] = CellDef;
+				this.m_ColorMap[i] = CellColor;
+				this.m_CellVisible[i] = Visible;
 			}
-			
-			
-			if ((PerformUpdate == true) || (ForceRefresh == true))
-			{
-				// Light refresh over the already known ore locations
-				m_LastTick = Find.TickManager.TicksGame;
 
-				// Sanity check
-				if (m_GlobalOreCellList != null)
-				{
-					// Now search every tile
-					foreach (int i in m_GlobalOreCellList)
-					{
-						this.m_ThingMap[i] = 0;
-						this.m_ColorMap[i] = m_DefaultOreColor;
-
-						IntVec3 MapCell = m_Map.cellIndices.IndexToCell(i);
-
-						if (!MapCell.InBounds(this.m_Map))
-							continue;
-
-						Mineable MineCell = MapCell.GetFirstMineable(m_Map);
-
-						if (MineCell != null)
-						{
-							foreach (KeyValuePair<ThingDef, Color> MineEntry in m_MineableList)
-							{
-								if (MineEntry.Key == MineCell.def)
-								{
-									this.m_ThingMap[i] = MineCell.def.shortHash;
-									this.m_ColorMap[i] = MineEntry.Value;
-									break;
-								}
-							}
-						}
-
-						foreach (Thing Th in MapCell.GetThingList(m_Map))
-						{
-							if (Th.def.defName == "SteamGeyser")
-							{
-								this.m_ThingMap[i] = Th.def.shortHash;
-								this.m_ColorMap[i] = m_SteamVent;
-							}
-							else if (Th.def.defName == "VPE_ChemfuelPond")
-							{
-								this.m_ThingMap[i] = Th.def.shortHash;
-								this.m_ColorMap[i] = m_ChemfuelDeposit;
-							}
-							else if ((Th.def.defName == "VPE_HelixienGeyser") || (Th.def.defName == "VHGE_GasGeyser"))
-							{
-								this.m_ThingMap[i] = Th.def.shortHash;
-								this.m_ColorMap[i] = m_HexDeposit;
-							}
-						}
-					}
-
-					m_Drawer.SetDirty();
-				}
-			}			
+			if (Changed == true)
+				m_Drawer.SetDirty();
         }
 
 		static Color CreateColor(int r, int g, int b)
@@ -277,11 +258,13 @@ namespace OreOverlay
 			{
 				if (m_ShowOres == true)
 				{
-					// Check for force refresh.
-					if (m_LastCheckOverlayEnabled == false)
-						RefreshOreOverlayData(true);
+					CheckForRefresh();
 
 					this.MarkForDraw();
+				}
+				else
+				{
+					m_WasShown = false;
 				}
 
 				m_Drawer.CellBoolDrawerUpdate();
@@ -304,48 +287,26 @@ namespace OreOverlay
             this.m_Drawer.MarkForDraw();
         }
 
+		// Only the current map is drawn and refreshed. Make sure a map gets a fresh scan when it is switched back to.
+		public override void MapComponentTick()
+		{
+			if (this.map != Find.CurrentMap)
+				m_WasShown = false;
+		}
+
 		// This is called during the overlay drawing for each cell to get the state.
 		public bool GetCellBool(int index)
         {
-            if (index >= map.cellIndices.NumGridCells)
-                return false;
-
-            if (m_ThingMap[index] != 0)
-            {
-				if (OreOverlayModOptions.m_ShowSteam == false)
-                {
-                    // Hide if steam
-                    ThingDef CellDef = DefDatabase<ThingDef>.GetByShortHash(m_ThingMap[index]);
-
-                    if ((CellDef.defName == "SteamGeyser") || (CellDef.defName == "VPE_ChemfuelPond") || (CellDef.defName == "VPE_HelixienGeyser") || (CellDef.defName == "VHGE_GasGeyser"))
-                        return false;
-                }
-
-                IntVec3 MapCell = m_Map.cellIndices.IndexToCell(index);
-
-
-                if ((this.m_Map.deepResourceGrid.AnyActiveDeepScannersOnMap() == true) || (MapCell.Fogged(this.m_Map) == false))
-                    return true;
-                else
-                    return false;
-            }
-            else
-            {
-                return false;
-            }
+			return (index < m_CellVisible.Length) && m_CellVisible[index];
         }
         
 		// This is called during the overlay drawing to colour a cell if flagged above.
         public Color GetCellExtraColor(int index)
         {
-            Color RetCol = m_DefaultOreColor;
+			if (index >= m_ColorMap.Length)
+				return m_DefaultOreColor;
 
-            if (index >= map.cellIndices.NumGridCells)
-                return RetCol;
-
-            RetCol = m_ColorMap[index];
-
-            return RetCol;
+			return m_ColorMap[index];
         }
 		#endregion
 		#region Mouseovers
@@ -384,43 +345,21 @@ namespace OreOverlay
 			// Handle the mouse over for cliff ores.
             if ((OreOverlayModOptions.m_ShowSeams == true) && (m_ShowOres == true))
             {
-                DrawHoverover = true;
-
                 IntVec3 MapCell = UI.MouseCell();
                 if (!MapCell.InBounds(this.m_Map))
-                    DrawHoverover = false;
+					return;
 
+				int index = m_Map.cellIndices.CellToIndex(MapCell);
+				ThingDef CellDef = m_CellDef[index];
 
-                if (DrawHoverover == true)
-                {
-                    int index = m_Map.cellIndices.CellToIndex(MapCell);
+				// Hide if steam
+				if ((CellDef == null) || IsSpecial(CellDef))
+					return;
 
-                    if (index < map.cellIndices.NumGridCells)
-                    {
-                        if (m_ThingMap[index] != 0)
-                        {
+				if ((m_ActiveScanner == false) && (MapCell.Fogged(this.m_Map) == true))
+					return;
 
-                            // Hide if steam
-                            ThingDef CellDef = DefDatabase<ThingDef>.GetByShortHash(m_ThingMap[index]);
-
-                            if ((CellDef.defName == "SteamGeyser") || (CellDef.defName == "VPE_ChemfuelPond") || (CellDef.defName == "VPE_HelixienGeyser") || (CellDef.defName == "VHGE_GasGeyser"))
-                                DrawHoverover = false;
-
-							if (DrawHoverover == true)
-							{
-								//IntVec3 MapCell = m_Map.cellIndices.IndexToCell(index);
-
-								if ((this.m_Map.deepResourceGrid.AnyActiveDeepScannersOnMap() == false) && (MapCell.Fogged(this.m_Map) == true))
-									DrawHoverover = false;
-							}
-
-							if (DrawHoverover == true)
-							{
-                                RenderCliffDeposit(CellDef);
-                            }
-                        }
-                    }
-                }
+				RenderCliffDeposit(CellDef);
             }
         }
 
@@ -431,19 +370,7 @@ namespace OreOverlay
             if (!MapCell.InBounds(this.m_Map))
                 return;
             
-            //Mineable MineCell = MapCell.GetFirstMineable(m_Map);
-
-            ThingDef thingDef = null;
-
-            try
-            {
-                thingDef = TargetThing.building.mineableThing;
-            }
-            catch (Exception)
-            {
-                thingDef = null;
-            }
-
+			ThingDef thingDef = TargetThing.building?.mineableThing;
 
             if (thingDef == null)
                 return;
