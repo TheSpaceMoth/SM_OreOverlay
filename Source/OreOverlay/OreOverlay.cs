@@ -19,22 +19,35 @@ namespace OreOverlay
         private static readonly Color m_SteamVent = CreateColor(41, 68, 194);
         private static readonly Color m_HexDeposit = CreateColor(96, 194, 82);
 
-		List<KeyValuePair<string, Color>> m_ColorOverrides = new List<KeyValuePair<string, Color>>()
+		// Colours for ores whose own def data gives a poor or ambiguous colour. Everything else is discovered in FindOwnColor.
+		private static readonly Dictionary<string, Color> m_ColorOverrides = new Dictionary<string, Color>()
 		{
-			new KeyValuePair<string, Color>("MineableSteel",      CreateColor(214, 141, 91)),
-			new KeyValuePair<string, Color>("MineableSilver",      CreateColor(186, 179, 157)),
-			new KeyValuePair<string, Color>("MineableGold",      CreateColor(209, 166, 17)),
-			new KeyValuePair<string, Color>("MineableUranium",      CreateColor(164, 189, 173)),
-			new KeyValuePair<string, Color>("MineablePlasteel",      CreateColor(160, 206, 214)),
-			new KeyValuePair<string, Color>("MineableJade",      CreateColor(25, 190, 0)),
-			new KeyValuePair<string, Color>("MineableComponentsIndustrial",      CreateColor(194, 120, 24)),
-			new KeyValuePair<string, Color>("MineableBlueJade",      CreateColor(44,96,165)),
-			new KeyValuePair<string, Color>("MineableRedJade",      CreateColor(185,35,31)),
-			new KeyValuePair<string, Color>("MineableWhiteJade",      CreateColor(255,255,255)),
-			new KeyValuePair<string, Color>("MineableBlackJade",      CreateColor(32,32,32)),
-			new KeyValuePair<string, Color>("MineableYellowJade",      CreateColor(230,194,44)),
-			new KeyValuePair<string, Color>("VPE_EltexOre",      CreateColor(181,230,224)),
+			{ "MineableSteel",      CreateColor(214, 141, 91) }, // Discovered beige, too close to silver
+			{ "MineableUranium",      CreateColor(164, 189, 173) }, // Discovered dark grey, same as obsidian
+			{ "MineableComponentsIndustrial",      CreateColor(194, 120, 24) }, // Discovered from the stuff colour, too close to gold
+			// Coloured jade from a mod that isn't available for checking what discovery gives
+			{ "MineableBlueJade",      CreateColor(44,96,165) },
+			{ "MineableRedJade",      CreateColor(185,35,31) },
+			{ "MineableWhiteJade",      CreateColor(255,255,255) },
+			{ "MineableBlackJade",      CreateColor(32,32,32) },
+			{ "MineableYellowJade",      CreateColor(230,194,44) },
 		};
+
+		// Colours by mined resource, for resources whose def data gives no usable colour (the icon average comes out grey).
+		private static readonly Dictionary<string, Color> m_ResourceColorOverrides = new Dictionary<string, Color>()
+		{
+			{ "ComponentSpacer",      CreateColor(230,214,90) },
+			{ "GravlitePanel",      CreateColor(150,120,230) },
+		};
+
+		// How good a colour source is, best first. Ores take the best colour found for their resource.
+		private const int SourceOverride = 0;
+		private const int SourceFleckColor = 1;
+		private const int SourceRockColor = 2;
+		private const int SourceStuffColor = 3;
+		private const int SourceIcon = 4;
+		private const int SourceNone = 5;
+		private static readonly string[] SourceNames = { "override", "rock colorTwo", "rock colour", "resource stuff colour", "resource icon", "uiIconColor" };
 
 		public Color Color => Color.white;
 		#endregion
@@ -61,7 +74,7 @@ namespace OreOverlay
 
             this.m_Drawer = new CellBoolDrawer((ICellBoolGiver)this, map.Size.x, map.Size.z, 3640, 0.33f);
 
-			PrepareMinableColourmap();
+			PrepareMinableColourmap(); // Normally already done on startup
 
 			// Create the map
 			this.m_ThingMap = new ushort[map.cellIndices.NumGridCells];
@@ -72,36 +85,184 @@ namespace OreOverlay
 
 		#region Ore data refresh
 		// This function prepares a list used to determine what colour ores should be. Update here to support new ores.
-		private void PrepareMinableColourmap()
+		public static void PrepareMinableColourmap()
 		{
-			if (m_MineableList == null)
+			if (m_MineableList != null)
+				return;
+
+			// Make a list of the mineables that we will highlight.
+			List<ThingDef> OreDefs = new List<ThingDef>();
+			foreach (ThingDef thingDef in DefDatabase<ThingDef>.AllDefsListForReading)
 			{
-				List<KeyValuePair<ThingDef, Color>> EntryList = new List<KeyValuePair<ThingDef, Color>>();
+				if (IsOreDef(thingDef))
+					OreDefs.Add(thingDef);
+			}
 
-				// Make a list of the mineables that we will highlight.
-				foreach (ThingDef thingDef in DefDatabase<ThingDef>.AllDefsListForReading)
+			// Every ore gets the best colour found for its resource, so the same resource has the same colour everywhere,
+			// e.g. VGE compressed steel and twisted steel get the vanilla steel colour and VEE jadeite the vanilla jade colour.
+			Dictionary<ThingDef, Color> ResourceColor = new Dictionary<ThingDef, Color>();
+			Dictionary<ThingDef, int> ResourceSource = new Dictionary<ThingDef, int>();
+			Dictionary<ThingDef, string> ResourceOrigin = new Dictionary<ThingDef, string>();
+
+			foreach (KeyValuePair<string, Color> Entry in m_ResourceColorOverrides)
+			{
+				ThingDef Resource = DefDatabase<ThingDef>.GetNamedSilentFail(Entry.Key);
+				if (Resource == null)
+					continue;
+
+				ResourceColor[Resource] = Entry.Value;
+				ResourceSource[Resource] = SourceOverride;
+				ResourceOrigin[Resource] = "resource override";
+			}
+
+			Dictionary<ThingDef, Color> OwnColor = new Dictionary<ThingDef, Color>();
+			Dictionary<ThingDef, int> OwnSource = new Dictionary<ThingDef, int>();
+			foreach (ThingDef thingDef in OreDefs)
+			{
+				OwnColor[thingDef] = FindOwnColor(thingDef, out int Source);
+				OwnSource[thingDef] = Source;
+
+				ThingDef Resource = thingDef.building.mineableThing;
+				if (!ResourceSource.TryGetValue(Resource, out int BestSource) || (Source < BestSource))
 				{
-					if (IsOreDef(thingDef))
-						EntryList.Add(new KeyValuePair<ThingDef, Color>(thingDef, thingDef.uiIconColor));
+					ResourceColor[Resource] = OwnColor[thingDef];
+					ResourceSource[Resource] = Source;
+					ResourceOrigin[Resource] = thingDef.defName;
+				}
+			}
+
+			List<KeyValuePair<ThingDef, Color>> EntryList = new List<KeyValuePair<ThingDef, Color>>();
+			foreach (ThingDef thingDef in OreDefs)
+			{
+				ThingDef Resource = thingDef.building.mineableThing;
+				Color OreColor = OwnColor[thingDef];
+				string Source = SourceNames[OwnSource[thingDef]];
+				if (ResourceSource[Resource] < OwnSource[thingDef])
+				{
+					OreColor = ResourceColor[Resource];
+					Source = "same resource as " + ResourceOrigin[Resource];
 				}
 
-				// Override some colour defaults
-				for (int i = 0; i < EntryList.Count; i++)
+				if (Prefs.DevMode && !m_ColorOverrides.ContainsKey(thingDef.defName))
+					Log.Message("[Ore Overlay] " + thingDef.defName + ": colour " + OreColor.ToString() + " from " + Source);
+
+				EntryList.Add(new KeyValuePair<ThingDef, Color>(thingDef, OreColor));
+			}
+
+			m_MineableList = EntryList;
+		}
+
+		// Picks the overlay colour of an ore from the override table or the def data of the rock or its resource.
+		private static Color FindOwnColor(ThingDef thingDef, out int Source)
+		{
+			Source = SourceOverride;
+			if (m_ColorOverrides.TryGetValue(thingDef.defName, out Color OverrideColor))
+				return OverrideColor;
+
+			// Resource rocks draw their flecks in colorTwo, e.g. vanilla ores, Jewelry's gems and Odyssey's obsidian.
+			Source = SourceFleckColor;
+			Color FleckColor = thingDef.graphicData?.colorTwo ?? Color.white;
+			if (FleckColor != Color.white)
+				return Brighten(FleckColor);
+
+			// Some ores tint the whole rock instead, e.g. VPE's eltex. Grey is just the stone colour.
+			Source = SourceRockColor;
+			Color RockColor = thingDef.graphicData?.color ?? Color.white;
+			if ((RockColor != Color.white) && !IsGrey(RockColor))
+				return Brighten(RockColor);
+
+			ThingDef Resource = thingDef.building.mineableThing;
+
+			Source = SourceStuffColor;
+			if ((Resource.stuffProps != null) && (Resource.stuffProps.color.a > 0f))
+				return Brighten(Resource.stuffProps.color);
+
+			// Last resort: the average colour of the resource icon.
+			// This needs the graphics device, so it only works on the main thread.
+			Source = SourceIcon;
+			if (UnityData.IsInMainThread && TryGetAverageIconColor(Resource, out Color IconColor))
+				return Brighten(IconColor);
+
+			Source = SourceNone;
+			return thingDef.uiIconColor;
+		}
+
+		private static bool IsGrey(Color color)
+		{
+			Color.RGBToHSV(color, out float H, out float S, out float V);
+			return S < 0.15f;
+		}
+
+		// The def colours are meant for textures and look dull on the overlay. Lift coloured ones to the brightness of the
+		// override table, but leave greys alone so dark ores like obsidian stay dark.
+		private static Color Brighten(Color color)
+		{
+			if (IsGrey(color))
+				return new Color(color.r, color.g, color.b, 1f);
+
+			Color.RGBToHSV(color, out float H, out float S, out float V);
+			return Color.HSVToRGB(H, S, Mathf.Max(V, 0.75f));
+		}
+
+		// Textures are not readable, so draw the icon scaled down into a render texture and read that back.
+		private static bool TryGetAverageIconColor(ThingDef def, out Color Average)
+		{
+			Average = Color.white;
+
+			Texture2D Icon = def.uiIcon;
+			if ((Icon == null) || (Icon == BaseContent.BadTex))
+				return false;
+
+			const int Size = 16;
+			RenderTexture Previous = RenderTexture.active;
+			RenderTexture Target = null;
+			Texture2D Readback = null;
+
+			// Everything that touches the renderer stays inside the try. On 1.7 these calls go through the engine's Unity shim,
+			// and a failure here must only cost the discovered colour, not the whole def lookup.
+			try
+			{
+				Target = RenderTexture.GetTemporary(Size, Size, 0, RenderTextureFormat.ARGB32);
+				Readback = new Texture2D(Size, Size, TextureFormat.ARGB32, false);
+				Graphics.Blit(Icon, Target);
+				RenderTexture.active = Target;
+				Readback.ReadPixels(new Rect(0, 0, Size, Size), 0, 0);
+				Readback.Apply();
+
+				// Weight by alpha so the transparent background doesn't count
+				float R = 0f, G = 0f, B = 0f, A = 0f;
+				foreach (Color Pixel in Readback.GetPixels())
 				{
-					foreach (KeyValuePair<string, Color> OverrideEntry in m_ColorOverrides)
-					{
-						if (OverrideEntry.Key == EntryList[i].Key.defName)
-						{
-							ThingDef TempThing = EntryList[i].Key;
-							EntryList.RemoveAt(i);
-							EntryList.Insert(0, new KeyValuePair<ThingDef, Color>(TempThing, OverrideEntry.Value));
-						}
-					}
+					R += Pixel.r * Pixel.a;
+					G += Pixel.g * Pixel.a;
+					B += Pixel.b * Pixel.a;
+					A += Pixel.a;
 				}
 
-				// Just in case of multi threading? unlikely..
-				if (m_MineableList == null)
-					m_MineableList = new List<KeyValuePair<ThingDef, Color>>(EntryList);
+				if (A <= 0f)
+					return false;
+
+				Color Tint = def.graphicData?.color ?? Color.white;
+				Average = new Color(R / A * Tint.r, G / A * Tint.g, B / A * Tint.b, 1f);
+				return true;
+			}
+			catch (Exception)
+			{
+				return false;
+			}
+			finally
+			{
+				try
+				{
+					RenderTexture.active = Previous;
+					if (Target != null)
+						RenderTexture.ReleaseTemporary(Target);
+					if (Readback != null)
+						UnityEngine.Object.Destroy(Readback);
+				}
+				catch (Exception)
+				{
+				}
 			}
 		}
 
