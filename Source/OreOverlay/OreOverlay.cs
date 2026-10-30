@@ -78,14 +78,11 @@ namespace OreOverlay
 			{
 				List<KeyValuePair<ThingDef, Color>> EntryList = new List<KeyValuePair<ThingDef, Color>>();
 
-				// Make a list mineables that we will highlight. Update here to ignore.
+				// Make a list of the mineables that we will highlight.
 				foreach (ThingDef thingDef in DefDatabase<ThingDef>.AllDefsListForReading)
 				{
-					if ((thingDef.mineable == true) && (thingDef.IsNonResourceNaturalRock == false))
-					{
-						if ((thingDef.defName.ToLower().StartsWith("smooth") == false) && (thingDef.defName.ToLower().StartsWith("raised") == false) && (thingDef.defName != "CollapsedRocks"))
-							EntryList.Add(new KeyValuePair<ThingDef, Color>(thingDef, thingDef.uiIconColor));
-					}
+					if (IsOreDef(thingDef))
+						EntryList.Add(new KeyValuePair<ThingDef, Color>(thingDef, thingDef.uiIconColor));
 				}
 
 				// Override some colour defaults
@@ -106,6 +103,35 @@ namespace OreOverlay
 				if (m_MineableList == null)
 					m_MineableList = new List<KeyValuePair<ThingDef, Color>>(EntryList);
 			}
+		}
+
+		// Mineables we will highlight. Update here to ignore.
+		private static bool IsOreDef(ThingDef thingDef)
+		{
+			if ((thingDef.mineable == false) || (thingDef.building == null))
+				return false;
+
+			// Plain rock is not an ore. Don't use ThingDef.IsNonResourceNaturalRock for this: since 1.6 it returns false for
+			// rock with mineablePreventNaturalRockOnSurface set, like Odyssey's vacstone, which then lit up whole asteroids.
+			if ((thingDef.building.isNaturalRock == true) && (thingDef.building.isResourceRock == false))
+				return false;
+
+			if (thingDef.IsSmoothed || thingDef.IsBlueprint || thingDef.IsFrame)
+				return false;
+
+			// Ores drop something when mined. This skips boulders, VGE's sealant goop and VEE's deep snow.
+			ThingDef Resource = thingDef.building.mineableThing;
+			if (Resource == null)
+				return false;
+
+			// Walls that drop rock chunks are terrain, not ore, e.g. the ice and sand walls from Biomes! Core.
+			if ((Resource.thingCategories != null) && Resource.thingCategories.Contains(ThingCategoryDefOf.StoneChunks))
+				return false;
+
+			if ((thingDef.defName.ToLower().StartsWith("smooth") == true) || (thingDef.defName.ToLower().StartsWith("raised") == true) || (thingDef.defName == "CollapsedRocks"))
+				return false;
+
+			return true;
 		}
 
 		// This is called each tick while the game is running, and is paused when the game is paused.
