@@ -1,5 +1,6 @@
 ﻿using HarmonyLib;
 using RimWorld;
+using RimWorld.Planet;
 using System;
 using UnityEngine;
 using Verse;
@@ -62,7 +63,8 @@ namespace OreOverlay
 		{
             Map CurMap = Find.CurrentMap;
 
-            if (CurMap != null)
+            // Same check as MapInterfaceUpdate itself: no map exists (e.g. gravship in flight), or the world map is shown.
+            if ((CurMap != null) && (WorldRendererUtility.DrawingMap == true))
             {
                 OreOverlayGrid Overlay = CurMap.GetComponent<OreOverlayGrid>();
 
