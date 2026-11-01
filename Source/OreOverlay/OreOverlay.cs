@@ -19,15 +19,13 @@ namespace OreOverlay
         private static readonly Color m_SteamVent = CreateColor(41, 68, 194);
         private static readonly Color m_HexDeposit = CreateColor(96, 194, 82);
 
+		// Colours for ores whose own def data gives a poor or ambiguous colour. Everything else is discovered in FindOwnColor.
 		private static readonly Dictionary<string, Color> m_ColorOverrides = new Dictionary<string, Color>()
 		{
-			{ "MineableSteel",      CreateColor(214, 141, 91) },
-			{ "MineableSilver",      CreateColor(186, 179, 157) },
-			{ "MineableGold",      CreateColor(209, 166, 17) },
-			{ "MineableUranium",      CreateColor(164, 189, 173) },
-			{ "MineablePlasteel",      CreateColor(160, 206, 214) },
-			{ "MineableJade",      CreateColor(25, 190, 0) },
-			{ "MineableComponentsIndustrial",      CreateColor(194, 120, 24) },
+			{ "MineableSteel",      CreateColor(214, 141, 91) }, // Discovered beige, too close to silver
+			{ "MineableUranium",      CreateColor(164, 189, 173) }, // Discovered dark grey, same as obsidian
+			{ "MineableComponentsIndustrial",      CreateColor(194, 120, 24) }, // Discovered from the stuff colour, too close to gold
+			// Coloured jade from a mod that isn't available for checking what discovery gives
 			{ "MineableBlueJade",      CreateColor(44,96,165) },
 			{ "MineableRedJade",      CreateColor(185,35,31) },
 			{ "MineableWhiteJade",      CreateColor(255,255,255) },
@@ -44,6 +42,22 @@ namespace OreOverlay
 			{ "VPE_HelixienGeyser",      m_HexDeposit },
 			{ "VHGE_GasGeyser",      m_HexDeposit },
 		};
+
+		// Colours by mined resource, for resources whose def data gives no usable colour (the icon average comes out grey).
+		private static readonly Dictionary<string, Color> m_ResourceColorOverrides = new Dictionary<string, Color>()
+		{
+			{ "ComponentSpacer",      CreateColor(230,214,90) },
+			{ "GravlitePanel",      CreateColor(150,120,230) },
+		};
+
+		// How good a colour source is, best first. Ores take the best colour found for their resource.
+		private const int SourceOverride = 0;
+		private const int SourceFleckColor = 1;
+		private const int SourceRockColor = 2;
+		private const int SourceStuffColor = 3;
+		private const int SourceIcon = 4;
+		private const int SourceNone = 5;
+		private static readonly string[] SourceNames = { "override", "rock colorTwo", "rock colour", "resource stuff colour", "resource icon", "uiIconColor" };
 
 		public Color Color => Color.white;
 		#endregion
