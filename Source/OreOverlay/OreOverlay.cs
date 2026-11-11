@@ -149,7 +149,24 @@ namespace OreOverlay
 		// Mineables we will highlight. Update here to ignore.
 		private static bool IsOreDef(ThingDef thingDef)
 		{
-			if ((thingDef.mineable == false) || (thingDef.IsNonResourceNaturalRock == true))
+			if ((thingDef.mineable == false) || (thingDef.building == null))
+				return false;
+
+			// Plain rock is not an ore. Don't use ThingDef.IsNonResourceNaturalRock for this: since 1.6 it returns false for
+			// rock with mineablePreventNaturalRockOnSurface set, like Odyssey's vacstone, which then lit up whole asteroids.
+			if ((thingDef.building.isNaturalRock == true) && (thingDef.building.isResourceRock == false))
+				return false;
+
+			if (thingDef.IsSmoothed || thingDef.IsBlueprint || thingDef.IsFrame)
+				return false;
+
+			// Ores drop something when mined. This skips boulders, VGE's sealant goop and VEE's deep snow.
+			ThingDef Resource = thingDef.building.mineableThing;
+			if (Resource == null)
+				return false;
+
+			// Walls that drop rock chunks are terrain, not ore, e.g. the ice and sand walls from Biomes! Core.
+			if ((Resource.thingCategories != null) && Resource.thingCategories.Contains(ThingCategoryDefOf.StoneChunks))
 				return false;
 
 			if ((thingDef.defName.ToLower().StartsWith("smooth") == true) || (thingDef.defName.ToLower().StartsWith("raised") == true) || (thingDef.defName == "CollapsedRocks"))
