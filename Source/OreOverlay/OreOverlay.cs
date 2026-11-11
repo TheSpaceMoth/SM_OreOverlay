@@ -137,6 +137,16 @@ namespace OreOverlay
 				}
 			}
 
+			if (Prefs.DevMode)
+			{
+				foreach (ThingDef thingDef in DefDatabase<ThingDef>.AllDefsListForReading)
+				{
+					ThingDef Ore = OreDefAt[thingDef.index];
+					if ((Ore != null) && (Ore != thingDef))
+						Log.Warning("[Ore Overlay] " + thingDef.defName + " has the same def index (" + thingDef.index + ") as the ore " + Ore.defName + ", probably because a mod removed defs without reindexing.");
+				}
+			}
+
 			// Every ore gets the best colour found for its resource, so the same resource has the same colour everywhere,
 			// e.g. VGE compressed steel and twisted steel get the vanilla steel colour and VEE jadeite the vanilla jade colour.
 			Dictionary<ThingDef, Color> ResourceColor = new Dictionary<ThingDef, Color>();
